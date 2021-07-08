@@ -7,6 +7,7 @@ const session = require("express-session");
 const passport = require("passport")
 const passportLocalMongoose = require("passport-local-mongoose");
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const FacebookStrategy = require('passport-facebook').Strategy;
 const findOrCreate = require('mongoose-findorcreate');
 
 const app = express();
@@ -33,13 +34,18 @@ mongoose.connect("mongodb://localhost:27017/userDB", {
 });
 
 const userSchema = new mongoose.Schema({
-  username: {type: String, unique: true},
+  username: {
+    type: String,
+    unique: true
+  },
   password: String,
   provider: String,
   email: String
 });
 
-userSchema.plugin(passportLocalMongoose, {usernameField: "username"});
+userSchema.plugin(passportLocalMongoose, {
+  usernameField: "username"
+});
 userSchema.plugin(findOrCreate);
 
 const User = new mongoose.model("user", userSchema);
@@ -55,23 +61,47 @@ passport.deserializeUser(function(id, done) {
   });
 });
 
+// Google Strategy
+
 passport.use(new GoogleStrategy({
-    clientID: process.env.CLIENT_ID,
-    clientSecret: process.env.CLIENT_SECRET,
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     callbackURL: "http://localhost:3000/auth/google/secrets"
   },
   function(accessToken, refreshToken, profile, cb) {
-    console.log(profile);
-    User.findOrCreate({username: profile.id},
-      {
+    // console.log(profile);
+    User.findOrCreate({
+        username: profile.id
+      }, {
         provider: profile.provider,
         email: profile._json.email
       },
-      function (err, user) {
+      function(err, user) {
         return cb(err, user);
+      });
+  }
+));
+
+// Facebook Strategy
+
+passport.use(new FacebookStrategy({
+    clientID: process.env.FACEBOOK_APP_ID,
+    clientSecret: process.env.FACEBOOK_APP_SECRET,
+    callbackURL: "http://localhost:3000/auth/facebook/secrets"
+  },
+  function(accessToken, refreshToken, profile, done) {
+    // console.log(profile);
+    User.findOrCreate({username: profile.id},{
+      provider: profile.provider,
+      // email: profile._json.email
+    }, function(err, user) {
+      if (err) { return done(err); }
+      done(null, user);
     });
   }
 ));
+
+// Routes
 
 app.route("/")
   .get(function(req, res) {
@@ -82,25 +112,10 @@ app.route("/login")
   .get(function(req, res) {
     res.render("login");
   })
-  // .post(function(req, res) {
-  //   const user = new User({
-  //     username: req.body.username,
-  //     password: req.body.password
-  //   });
-  //   req.login(user, function(err) {
-  //     if (err) {
-  //       console.log(err);
-  //       req.logout();
-  //       res.redirect("/login");
-  //     } else {
-  //       passport.authenticate("local")(req, res, function() {
-  //         res.redirect("/secrets");
-  //       });
-  //     }
-  //   });
-  // });
-
-  .post(passport.authenticate("local", { successRedirect: '/secrets', failureRedirect: '/login' }));
+  .post(passport.authenticate("local", {
+    successRedirect: '/secrets',
+    failureRedirect: '/login'
+  }));
 
 app.get("/secrets", function(req, res) {
   if (req.isAuthenticated()) {
@@ -110,17 +125,34 @@ app.get("/secrets", function(req, res) {
   }
 });
 
-app.get("/logout", function(req, res){
+app.get("/logout", function(req, res) {
   req.logout();
   res.redirect("/");
 });
 
 // Google authentication
 
-app.get("/auth/google", passport.authenticate("google", {scope: ["profile", "email"]}));
+app.get("/auth/google", passport.authenticate("google", {
+  scope: ["profile", "email"]
+}));
 
 app.get("/auth/google/secrets",
-  passport.authenticate("google", { failureRedirect: "/login" }),
+  passport.authenticate("google", {
+    failureRedirect: "/login"
+  }),
+  function(req, res) {
+    // Successful authentication, redirect to secrets.
+    res.redirect("/secrets");
+  });
+
+// Facebook authentication
+
+app.get("/auth/facebook", passport.authenticate("facebook"));
+
+app.get("/auth/facebook/secrets",
+  passport.authenticate("facebook", {
+    failureRedirect: "/login"
+  }),
   function(req, res) {
     // Successful authentication, redirect to secrets.
     res.redirect("/secrets");
